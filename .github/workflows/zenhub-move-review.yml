@@ -5,6 +5,10 @@ on:
         types: [opened]
     workflow_call: {}
 
+permissions:
+    contents: read
+    issues: write
+
 jobs:
     get_issue_number:
         if: github.base_ref == 'dev' || github.base_ref == 'develop'
