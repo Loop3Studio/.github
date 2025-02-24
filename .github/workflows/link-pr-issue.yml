@@ -1,0 +1,32 @@
+name: Link PR to Issue
+
+on:
+    pull_request:
+        types: [opened]
+    workflow_call: {}
+
+jobs:
+    extract_issue_number:
+        if: github.base_ref == 'dev' || github.base_ref == 'develop'
+        uses: ./.github/workflows/extract-issue-number.yml
+        with:
+            branch_name: ${{ github.head_ref }}
+
+    link_pr_to_issue:
+        if: (github.head_ref != 'dev' && github.head_ref != 'develop') || github.base_ref != 'main'
+        needs: extract_issue_number
+        runs-on: ubuntu-latest
+        permissions:
+            pull-requests: write
+        steps:
+            - name: Add Comment to PR
+              run: |
+                  curl -X POST \
+                    -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    -H "Accept: application/vnd.github.v3+json" \
+                    https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+                    -d @- <<EOF
+                  {
+                    "body": "Resolves #${{ needs.extract_issue_number.outputs.issue_number }}"
+                  }
+                  EOF

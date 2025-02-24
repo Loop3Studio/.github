@@ -1,0 +1,34 @@
+name: Check PR Linked Issues
+
+on:
+    pull_request:
+        types: [opened, edited, reopened, synchronize]
+    workflow_call: {}
+
+jobs:
+    format_pr_title:
+        uses: ./.github/workflows/format-pr-title.yml
+
+    check_pull_requests:
+        needs: format_pr_title
+        if: github.base_ref == 'dev' || github.base_ref == 'develop' || github.base_ref == 'main'
+        runs-on: ubuntu-latest
+        name: Check linked issues
+        permissions:
+            issues: read
+            pull-requests: write
+            actions: read
+        steps:
+            - name: Debug information
+              run: |
+                  echo "Base ref: ${{ github.base_ref }}"
+                  echo "PR number: ${{ github.event.pull_request.number }}"
+                  echo "PR title: ${{ github.event.pull_request.title }}"
+
+            - uses: nearform-actions/github-action-check-linked-issues@v1
+              id: check-linked-issues
+              with:
+                  exclude-branches: "release/**, dependabot/**"
+            # OPTIONAL: Use the output from the `check-linked-issues` step
+            - name: Get the output
+              run: echo "How many linked issues? ${{ steps.check-linked-issues.outputs.linked_issues_count }}"

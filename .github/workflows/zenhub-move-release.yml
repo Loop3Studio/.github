@@ -1,0 +1,83 @@
+name: "[Zenhub] Move Released Issues"
+
+on:
+    release:
+        types: [published, edited]
+    workflow_call: {}
+
+jobs:
+    process_release_issues:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Get Release Notes Issues
+              id: get-issues
+              run: |
+                  # Get release notes content
+                  RELEASE_DATA=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    "https://api.github.com/repos/${{ github.repository }}/releases/${{ github.event.release.id }}")
+
+                  # Debug: Print release data
+                  echo "Release Data:"
+                  echo "$RELEASE_DATA" | jq '.'
+
+                  RELEASE_BODY=$(echo "$RELEASE_DATA" | jq -r '.body // ""')
+
+                  # Debug: Print release body
+                  echo "Release Body:"
+                  echo "$RELEASE_BODY"
+
+                  # Extract issue numbers using regex (matches #number patterns)
+                  # Using perl for better regex support
+                  ISSUES=$(echo "$RELEASE_BODY" | perl -nle 'push @numbers, /#(\d+)/g; END{print join(",", @numbers)}' || echo "")
+
+                  # Debug: Print extracted issues
+                  echo "Extracted Issues:"
+                  echo "$ISSUES"
+
+                  if [ -z "$ISSUES" ]; then
+                    echo "No issues found in release notes"
+                    ISSUES_JSON="[]"
+                  else
+                    # Convert to JSON array, properly handling multiple issues
+                    ISSUES_JSON="[$(echo "$ISSUES" | sed 's/,/,/g')]"
+                  fi
+
+                  # Debug: Print final JSON
+                  echo "Final JSON:"
+                  echo "$ISSUES_JSON"
+
+                  echo "issues=$ISSUES_JSON" >> $GITHUB_OUTPUT
+
+            - name: Move Zenhub Pipeline
+              if: steps.get-issues.outputs.issues != '[]'
+              run: |
+                  TARGET_PIPELINE_ID="Z2lkOi8vcmFwdG9yL1BpcGVsaW5lLzM0MjIxNjI"
+                  ISSUES=$(echo '${{ steps.get-issues.outputs.issues }}' | jq -r '.[]')
+
+                  for ISSUE in $ISSUES; do
+                    echo "Processing issue #${ISSUE}"
+                    ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${ISSUE}/moves"
+                    
+                    RESPONSE=$(curl -X POST \
+                      -H "X-Authentication-Token: ${{ secrets.ZENHUB_API_TOKEN }}" \
+                      -H "Content-Type: application/json" \
+                      -w "\n%{http_code}" \
+                      -d '{
+                        "pipeline_id": "'"$TARGET_PIPELINE_ID"'",
+                        "position": "top"
+                      }' \
+                      "$ZENHUB_API")
+                    
+                    HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+                    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+                    
+                    echo "Moving issue #${ISSUE}"
+                    echo "HTTP Status: $HTTP_STATUS"
+                    echo "Response: $RESPONSE_BODY"
+                    
+                    if [[ $HTTP_STATUS -lt 200 || $HTTP_STATUS -gt 299 ]]; then
+                      echo "Failed to move issue #${ISSUE} in Zenhub. Status code: $HTTP_STATUS"
+                      echo "Error response: $RESPONSE_BODY"
+                      exit 1
+                    fi
+                  done

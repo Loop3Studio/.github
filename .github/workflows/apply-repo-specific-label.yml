@@ -1,0 +1,87 @@
+name: Apply Repository-Specific Issue Labels
+
+on:
+    workflow_call:
+        inputs:
+            issue_number:
+                required: false
+                type: number
+            repository:
+                required: true
+                type: string
+            pr_number:
+                required: false
+                type: number
+
+permissions:
+    issues: write
+    pull-requests: write
+    contents: read
+
+jobs:
+    extract-issue:
+        if: inputs.issue_number == null && (github.base_ref != 'dev' && github.base_ref != 'staging' && github.base_ref != 'main')
+        uses: ./.github/workflows/extract-issue-number.yml
+        with:
+            branch_name: ${{ github.head_ref || github.ref_name }}
+
+    add-labels:
+        needs: extract-issue
+        runs-on: ubuntu-latest
+        steps:
+            - name: Apply custom labels to issue and PR
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  REPO_NAME="${{ inputs.repository }}"
+                  ISSUE_NUMBER="${{ inputs.issue_number || needs.extract-issue.outputs.issue_number }}"
+                  PR_NUMBER="${{ inputs.pr_number || github.event.pull_request.number }}"
+
+                  echo "Debug information:"
+                  echo "Repository: $REPO_NAME"
+                  echo "Issue number: $ISSUE_NUMBER"
+                  echo "PR number: $PR_NUMBER"
+
+                  # Fail if no issue number is found
+                  if [ -z "$ISSUE_NUMBER" ] || [ "$ISSUE_NUMBER" = "null" ]; then
+                    echo "Error: No issue number found. Either provide an issue number as input or ensure the branch name contains one."
+                    exit 1
+                  fi
+
+                  # Define repository-specific labels
+                  case "$REPO_NAME" in
+                    "Loop3Studio/123-02_greylock-slack-app")
+                      LABEL="[Greylock] Slack App"
+                      ;;
+                    "Loop3Studio/123-01_greylock-chrome-extension")
+                      LABEL="[Greylock] Chrome Extension"
+                      ;;
+                    *)
+                      LABEL=""
+                      ;;
+                  esac
+
+                  if [ -n "$LABEL" ]; then
+                    echo "Attempting to apply label: $LABEL"
+                    
+                    # Apply label to issue
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$REPO_NAME/issues/$ISSUE_NUMBER/labels" \
+                      -d "{\"labels\":[\"$LABEL\"]}"
+                    
+                    # Apply label to PR if PR number exists
+                    if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+                      curl -X POST \
+                        -H "Authorization: token $GITHUB_TOKEN" \
+                        -H "Accept: application/vnd.github.v3+json" \
+                        "https://api.github.com/repos/$REPO_NAME/issues/$PR_NUMBER/labels" \
+                        -d "{\"labels\":[\"$LABEL\"]}"
+                      echo "Label applied to PR #$PR_NUMBER"
+                    fi
+                    
+                    echo "Label application completed"
+                  else
+                    echo "No specific label defined for this repository"
+                  fi

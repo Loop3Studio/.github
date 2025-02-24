@@ -1,0 +1,45 @@
+name: "[Zenhub] Move Issue to In Progress"
+
+on:
+    create:
+        branches:
+            - "**"
+    workflow_call: {}
+
+jobs:
+    extract_issue_number:
+        uses: ./.github/workflows/extract-issue-number.yml
+        with:
+            branch_name: ${{ github.ref_name }}
+
+    move_issue:
+        needs: extract_issue_number
+        runs-on: ubuntu-latest
+        steps:
+            - name: Move Zenhub Pipeline
+              run: |
+                  ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${{ needs.extract_issue_number.outputs.issue_number }}/moves"
+                  TARGET_PIPELINE_ID="Z2lkOi8vcmFwdG9yL1BpcGVsaW5lLzM0MjIxNjA"
+
+                  # Make API call and capture response
+                  RESPONSE=$(curl -s -S -X POST \
+                    -H "X-Authentication-Token: ${{ secrets.ZENHUB_API_TOKEN }}" \
+                    -H "Content-Type: application/json" \
+                    -w "\n%{http_code}" \
+                    -d '{
+                      "pipeline_id": "'"$TARGET_PIPELINE_ID"'",
+                      "position": "top"
+                    }' \
+                    "$ZENHUB_API")
+
+                  # Extract status code and response body
+                  HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+                  RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+                  if [[ $HTTP_STATUS -lt 200 || $HTTP_STATUS -gt 299 ]]; then
+                    echo "::error::Failed to move Zenhub issue. API returned status $HTTP_STATUS"
+                    if [[ ! -z "$RESPONSE_BODY" ]]; then
+                      echo "::error::$RESPONSE_BODY"
+                    fi
+                    exit 1
+                  fi

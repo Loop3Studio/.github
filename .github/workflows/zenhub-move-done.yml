@@ -1,0 +1,68 @@
+name: "[Zenhub] Move Multiple Issues to Done"
+
+on:
+    pull_request:
+        types: [closed]
+        branches:
+            - main
+    workflow_call: {}
+
+jobs:
+    process_issues:
+        if: github.event.pull_request.merged == true && github.base_ref == 'main'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Get Linked Issues
+              id: get-issues
+              shell: bash
+              run: |
+                  # Get PR body and comments to find issue references
+                  PR_DATA=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}")
+
+                  PR_BODY=$(echo "$PR_DATA" | jq -r '.body // ""')
+
+                  # Extract issue numbers and handle empty results
+                  ISSUES=$(echo "$PR_BODY" | grep -oP '(?:fixes|closes|resolves)\s+#\K[0-9]+' || echo "")
+
+                  if [ -z "$ISSUES" ]; then
+                    echo "issues=[]" >> "$GITHUB_OUTPUT"
+                  else
+                    # Create a compact JSON array with no whitespace
+                    ISSUES_JSON=$(echo "$ISSUES" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                    echo "issues=$ISSUES_JSON" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Move Issues in Zenhub
+              if: steps.get-issues.outputs.issues != '[]'
+              run: |
+                  TARGET_PIPELINE_ID="Z2lkOi8vcmFwdG9yL1BpcGVsaW5lLzM0MjIxNjI"
+                  ISSUES=$(echo '${{ steps.get-issues.outputs.issues }}' | jq -r '.[]')
+
+                  for ISSUE in $ISSUES; do
+                    echo "Processing issue #${ISSUE}"
+                    ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${ISSUE}/moves"
+                    
+                    RESPONSE=$(curl -X POST \
+                      -H "X-Authentication-Token: ${{ secrets.ZENHUB_API_TOKEN }}" \
+                      -H "Content-Type: application/json" \
+                      -w "\n%{http_code}" \
+                      -d '{
+                        "pipeline_id": "'"$TARGET_PIPELINE_ID"'",
+                        "position": "top"
+                      }' \
+                      "$ZENHUB_API")
+                    
+                    HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+                    RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+                    
+                    echo "Moving issue #${ISSUE}"
+                    echo "HTTP Status: $HTTP_STATUS"
+                    echo "Response: $RESPONSE_BODY"
+                    
+                    if [[ $HTTP_STATUS -lt 200 || $HTTP_STATUS -gt 299 ]]; then
+                      echo "Failed to move issue #${ISSUE} in Zenhub. Status code: $HTTP_STATUS"
+                      echo "Error response: $RESPONSE_BODY"
+                      exit 1
+                    fi
+                  done

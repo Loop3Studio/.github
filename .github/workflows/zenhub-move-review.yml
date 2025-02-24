@@ -1,0 +1,49 @@
+name: "[Zenhub] Move Issue to In Review"
+
+on:
+    pull_request:
+        types: [opened]
+    workflow_call: {}
+
+jobs:
+    get_issue_number:
+        if: github.base_ref == 'dev' || github.base_ref == 'develop'
+        uses: ./.github/workflows/extract-issue-number.yml
+        with:
+            branch_name: ${{ github.head_ref }}
+
+    move_to_review:
+        if: (github.head_ref != 'dev' && github.head_ref != 'develop') || github.base_ref != 'main'
+        needs: get_issue_number
+        runs-on: ubuntu-latest
+        steps:
+            - name: Move Zenhub Pipeline
+              run: |
+                  ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${{ needs.get_issue_number.outputs.issue_number }}/moves"
+                  TARGET_PIPELINE_ID="Z2lkOi8vcmFwdG9yL1BpcGVsaW5lLzM0MjIxNjE"
+
+                  # Store response and status code
+                  RESPONSE=$(curl -X POST \
+                    -H "X-Authentication-Token: ${{ secrets.ZENHUB_API_TOKEN }}" \
+                    -H "Content-Type: application/json" \
+                    -w "\n%{http_code}" \
+                    -d '{
+                      "pipeline_id": "'"$TARGET_PIPELINE_ID"'",
+                      "position": "top"
+                    }' \
+                    "$ZENHUB_API")
+
+                  # Extract status code from last line
+                  HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+                  # Extract response body (all but last line)
+                  RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+                  echo "HTTP Status: $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+
+                  # Check if status code is not in 2xx range
+                  if [[ $HTTP_STATUS -lt 200 || $HTTP_STATUS -gt 299 ]]; then
+                    echo "Failed to move issue in Zenhub. Status code: $HTTP_STATUS"
+                    echo "Error response: $RESPONSE_BODY"
+                    exit 1
+                  fi
