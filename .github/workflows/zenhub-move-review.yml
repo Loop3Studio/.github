@@ -18,7 +18,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Check secret value
-              run: echo "${{ secrets.ZENHUB_API_TOKEN }}"
+              run: echo "test ${{ secrets.ZENHUB_API_TOKEN }}"
             - name: Move Zenhub Pipeline
               run: |
                   ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${{ needs.get_issue_number.outputs.issue_number }}/moves"
