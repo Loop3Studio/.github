@@ -16,8 +16,6 @@ jobs:
         needs: extract_issue_number
         runs-on: ubuntu-latest
         steps:
-            - name: Check secret value
-              run: echo "${{ secrets.MY_SECRET }}"
             - name: Move Zenhub Pipeline
               run: |
                   ZENHUB_API="https://api.zenhub.com/p1/repositories/${{ github.event.repository.id }}/issues/${{ needs.extract_issue_number.outputs.issue_number }}/moves"
